@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>大型活動動態座位圖導覽系統</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      overflow: hidden;
+    }
+    .map-container {
+      cursor: grab;
+      user-select: none;
+    }
+    .map-container:active {
+      cursor: grabbing;
+    }
+    .table-node {
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
+    .table-node:hover {
+      filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.8));
+    }
+    .active-highlight {
+      animation: pulse-ring 1.5s infinite;
+    }
+    @keyframes pulse-ring {
+      0% {
+        stroke-width: 3px;
+        stroke: #f59e0b;
+        filter: drop-shadow(0 0 4px #f59e0b);
+      }
+      50% {
+        stroke-width: 8px;
+        stroke: #ef4444;
+        filter: drop-shadow(0 0 15px #ef4444);
+      }
+      100% {
+        stroke-width: 3px;
+        stroke: #f59e0b;
+        filter: drop-shadow(0 0 4px #f59e0b);
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 h-screen flex flex-col">
+
+  <!-- 頂部標題與快速驗證測試列 -->
+  <header class="bg-slate-800/90 border-b border-slate-700 px-4 py-3 flex flex-wrap justify-between items-center z-10 gap-2">
+    <div class="flex items-center space-x-3">
+      <i class="fa-solid fa-map-location-dot text-amber-400 text-2xl"></i>
+      <div>
+        <h1 class="font-bold text-lg leading-tight text-amber-400">盛宴座位圖與導覽系統</h1>
+        <p class="text-xs text-slate-400">北方主舞台與中央十字走道配置（全場名單公開查詢）</p>
+      </div>
+    </div>
+    
+    <!-- 快速測試按鈕（方便點擊驗證效果） -->
+    <div class="flex items-center space-x-2 text-xs">
+      <span class="text-slate-400 hidden sm:inline">快速測試搜尋:</span>
+      <button onclick="quickSearch('張總理')" class="bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-1 rounded hover:bg-amber-500/40">主桌: 張總理</button>
+      <button onclick="quickSearch('林大同')" class="bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 px-2 py-1 rounded hover:bg-indigo-500/40">VIP: 林大同</button>
+      <button onclick="quickSearch('王大明')" class="bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-1 rounded hover:bg-emerald-500/40">A區: 王大明</button>
+    </div>
+  </header>
+
+  <!-- 主內容區：左側邊欄 + 右側 SVG 地圖 -->
+  <div class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+
+    <!-- 控制與搜尋邊欄 -->
+    <aside class="w-full md:w-80 bg-slate-800 border-r border-slate-700 p-4 flex flex-col z-10 space-y-4 shadow-xl">
+      
+      <!-- 賓客姓名搜尋框 -->
+      <div class="bg-slate-900/80 p-3 rounded-lg border border-slate-700 space-y-2">
+        <label class="text-xs font-bold text-amber-400 block"><i class="fa-solid fa-magnifying-glass mr-1"></i>搜尋賓客姓名定位</label>
+        <div class="flex space-x-2">
+          <input type="text" id="searchInput" placeholder="請輸入姓名 (如: 王大明)" class="w-full bg-slate-800 border border-slate-600 rounded px-2.5 py-1.5 text-sm text-white focus:outline-none focus:border-amber-400">
+          <button onclick="searchGuest()" class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold px-4 py-1.5 rounded text-sm transition">
+            搜尋
+          </button>
+        </div>
+      </div>
+
+      <!-- 選取桌位詳細資訊卡 -->
+      <div class="flex-1 bg-slate-900/50 p-4 rounded-lg border border-slate-700 flex flex-col justify-between overflow-y-auto">
+        <div>
+          <div class="flex justify-between items-start border-b border-slate-700 pb-2 mb-3">
+            <div>
+              <span id="selectedZoneBadge" class="text-[10px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded font-bold">請點擊桌號</span>
+              <h2 id="selectedTableTitle" class="text-xl font-bold text-amber-400 mt-1">點擊地圖或搜尋</h2>
+            </div>
+            <i class="fa-solid fa-chair text-slate-600 text-2xl" id="chairIcon"></i>
+          </div>
+
+          <!-- 同桌賓客清單 -->
+          <div class="space-y-2">
+            <h3 class="text-xs font-semibold text-slate-400 flex items-center">
+              <i class="fa-solid fa-users mr-1.5"></i> 同桌賓客名單：
+            </h3>
+            <ul id="guestListDisplay" class="text-sm space-y-1 text-slate-200">
+              <li class="text-slate-500 italic text-xs">點擊地圖上的圓圈或搜尋名字以查看賓客...</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- 圖例說明 -->
+        <div class="pt-4 border-t border-slate-700/60 text-xs space-y-1.5 text-slate-400">
+          <div class="font-bold text-slate-300 mb-1">場地圖例說明：</div>
+          <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-amber-500 mr-2 border border-amber-300"></span> 主桌 (Main VIP)</div>
+          <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-indigo-600 mr-2 border border-amber-400"></span> 走道兩側 VIP 桌</div>
+          <div class="flex items-center"><span class="w-3 h-3 rounded-full bg-slate-700 mr-2 border border-slate-500"></span> 一般賓客桌</div>
+          <div class="flex items-center"><span class="w-3 h-2 bg-amber-400/30 mr-2 border border-amber-400/60"></span> 中央十字璀璨走道</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右側地圖畫布 -->
+    <main class="flex-1 relative bg-slate-950 overflow-hidden flex items-center justify-center">
+      
+      <!-- 地圖縮放控制按鈕 -->
+      <div class="absolute right-4 top-4 z-20 flex flex-col space-y-2 bg-slate-800/80 p-1.5 rounded-lg border border-slate-700">
+        <button onclick="zoom(1.2)" class="w-8 h-8 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-white rounded"><i class="fa-solid fa-plus"></i></button>
+        <button onclick="resetZoom()" class="w-8 h-8 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-amber-400 font-bold text-xs rounded">100%</button>
+        <button onclick="zoom(0.8)" class="w-8 h-8 flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-white rounded"><i class="fa-solid fa-minus"></i></button>
+      </div>
+
+      <!-- SVG 地圖容器 -->
+      <div id="mapViewport" class="w-full h-full flex items-center justify-center map-container">
+        <svg id="svgMap" width="100%" height="100%" viewBox="0 0 1200 900" class="max-w-full max-h-full">
+          <defs>
+            <radialGradient id="stageGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.4"/>
+              <stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/>
+            </radialGradient>
+          </defs>
+
+          <!-- 全圖背景點陣區 -->
+          <g id="mapGroup">
+            <!-- 1. 北方主舞台 (STAGE) -->
+            <rect x="420" y="20" width="360" height="60" rx="10" fill="#1e293b" stroke="#f59e0b" stroke-width="3" />
+            <rect x="430" y="25" width="340" height="50" rx="6" fill="url(#stageGlow)" />
+            <text x="600" y="55" fill="#fbbf24" font-size="20" font-weight="bold" text-anchor="middle" letter-spacing="4">主 舞 臺 STAGE</text>
+
+            <!-- 2. 中央十字型走道 -->
+            <!-- 垂直主走道 -->
+            <rect x="560" y="80" width="80" height="800" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 4" />
+            <!-- 水平橫向走道 -->
+            <rect x="50" y="460" width="1100" height="80" fill="#f59e0b" fill-opacity="0.12" stroke="#f59e0b" stroke-width="1" stroke-dasharray="4 4" />
+            <!-- 十字交叉中心亮點 -->
+            <rect x="560" y="460" width="80" height="80" fill="#f59e0b" fill-opacity="0.25" />
+
+            <!-- 3. 北方尊榮主桌 (Main VIP) -->
+            <g class="table-node" id="table-Main" onclick="selectTable('Main')">
+              <circle cx="600" cy="125" r="32" fill="#d97706" stroke="#fef08a" stroke-width="3" />
+              <text x="600" y="130" fill="#ffffff" font-size="14" font-weight="bold" text-anchor="middle">主桌</text>
+            </g>
+
+            <!-- 4. 動態生成的四大區域 (A, B, C, D區，各20桌) -->
+            <g id="dynamicTables"></g>
+          </g>
+        </svg>
+      </div>
+    </main>
+  </div>
+
+  <!-- JavaScript 邏輯控制 -->
+  <script>
+    // ==========================================
+    // 1. 賓客與桌位資料庫 (可由 Excel 匯出替換)
+    // ==========================================
+    const RAW_GUEST_LIST = [
+      { table: "Main", name: "張總理" },
+      { table: "Main", name: "陳董事長" },
+      { table: "Main", name: "林總經理" },
+      { table: "A-20", name: "林大同" },
+      { table: "A-20", name: "張小燕" },
+      { table: "A-01", name: "王大明" },
+      { table: "A-01", name: "李小美" },
+      { table: "B-16", name: "趙貴賓" },
+      { table: "C-05", name: "許主管" },
+      { table: "D-01", name: "鄭先生" }
+    ];
+
+    // 動態桌號邏輯與 VIP 判定
+    const TABLES_DB = {};
+    const VIP_TABLES = ["A-04", "A-08", "A-12", "A-16", "A-20", "B-01", "B-05", "B-09", "B-13", "B-17", "C-04", "C-08", "C-12", "C-16", "C-20", "D-01", "D-05", "D-09", "D-13", "D-17"];
+
+    // 建立 81 桌的基礎資料結構
+    function initTablesDB() {
+      TABLES_DB["Main"] = { id: "Main", name: "主桌 (Main VIP)", zone: "主桌區", guests: [], isVIP: true };
+      
+      const zones = ['A', 'B', 'C', 'D'];
+      zones.forEach(zone => {
+        for (let i = 1; i <= 20; i++) {
+          const tId = `${zone}-${i < 10 ? '0' + i : i}`;
+          const isVip = VIP_TABLES.includes(tId);
+          TABLES_DB[tId] = {
+            id: tId,
+            name: `${zone}區 - ${tId} ${isVip ? '(VIP)' : ''}`,
+            zone: `${zone}區`,
+            guests: [],
+            isVIP: isVip
+          };
+        }
+      });
+
+      // 載入賓客資料
+      RAW_GUEST_LIST.forEach(g => {
+        if (TABLES_DB[g.table]) {
+          TABLES_DB[g.table].guests.push(g.name);
+        }
+      });
+    }
+
+    // ==========================================
+    // 2. 渲染地圖上的 80 張桌子坐標
+    // ==========================================
+    function renderSVGMap() {
+      const dynamicGroup = document.getElementById("dynamicTables");
+      let html = "";
+
+      // 定義四大區域的 XY 起始坐標與行列偏移
+      const zoneConfigs = {
+        'A': { startX: 120, startY: 180, cols: 5, stepX: 85, stepY: 60 },
+        'B': { startX: 680, startY: 180, cols: 5, stepX: 85, stepY: 60 },
+        'C': { startX: 120, startY: 580, cols: 5, stepX: 85, stepY: 60 },
+        'D': { startX: 680, startY: 580, cols: 5, stepX: 85, stepY: 60 }
+      };
+
+      Object.keys(zoneConfigs).forEach(zone => {
+        const config = zoneConfigs[zone];
+        for (let i = 1; i <= 20; i++) {
+          const tId = `${zone}-${i < 10 ? '0' + i : i}`;
+          const col = (i - 1) % config.cols;
+          const row = Math.floor((i - 1) / config.cols);
+          const cx = config.startX + col * config.stepX;
+          const cy = config.startY + row * config.stepY;
+
+          const isVip = TABLES_DB[tId].isVIP;
+          const fillColor = isVip ? "#3730a3" : "#334155";
+          const strokeColor = isVip ? "#fbbf24" : "#64748b";
+
+          html += `
+            <g class="table-node" id="table-${tId}" onclick="selectTable('${tId}')">
+              <circle cx="${cx}" cy="${cy}" r="20" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${isVip ? 2.5 : 1.5}" />
+              <text x="${cx}" y="${cy + 4}" fill="#ffffff" font-size="10" font-weight="bold" text-anchor="middle">${tId}</text>
+            </g>
+          `;
+          TABLES_DB[tId].cx = cx;
+          TABLES_DB[tId].cy = cy;
+        }
+      });
+
+      // 主桌坐標
+      TABLES_DB["Main"].cx = 600;
+      TABLES_DB["Main"].cy = 125;
+
+      dynamicGroup.innerHTML = html;
+    }
+
+    // ==========================================
+    // 3. 點擊與搜尋互動邏輯
+    // ==========================================
+    let currentSelectedId = null;
+
+    function selectTable(tableId) {
+      const data = TABLES_DB[tableId];
+      if (!data) return;
+
+      // 移除上一個高亮
+      if (currentSelectedId) {
+        const prevEl = document.getElementById(`table-${currentSelectedId}`);
+        if (prevEl) prevEl.querySelector("circle").classList.remove("active-highlight");
+      }
+
+      // 加上高亮
+      currentSelectedId = tableId;
+      const targetEl = document.getElementById(`table-${tableId}`);
+      if (targetEl) {
+        targetEl.querySelector("circle").classList.add("active-highlight");
+      }
+
+      // 更新左側資訊卡
+      document.getElementById("selectedTableTitle").innerText = data.name;
+      document.getElementById("selectedZoneBadge").innerText = data.zone;
+
+      // 渲染同桌名單
+      const listEl = document.getElementById("guestListDisplay");
+      if (data.guests.length > 0) {
+        listEl.innerHTML = data.guests.map(g => `<li class="bg-slate-800 px-2 py-1 rounded border border-slate-700/50 flex items-center"><i class="fa-solid fa-user text-amber-400 text-xs mr-2"></i>${g}</li>`).join("");
+      } else {
+        listEl.innerHTML = `<li class="text-slate-500 italic text-xs">該桌目前尚無登記預設賓客</li>`;
+      }
+
+      // 平滑移動畫布至中心
+      focusCoordinate(data.cx, data.cy);
+    }
+
+    // 人名搜尋
+    function searchGuest() {
+      const name = document.getElementById("searchInput").value.trim();
+      if (!name) return;
+
+      let foundTableId = null;
+      Object.keys(TABLES_DB).forEach(id => {
+        if (TABLES_DB[id].guests.includes(name)) {
+          foundTableId = id;
+        }
+      });
+
+      if (foundTableId) {
+        selectTable(foundTableId);
+      } else {
+        alert(`找不到賓客「${name}」的座位資訊，請確認姓名是否輸入正確。`);
+      }
+    }
+
+    function quickSearch(name) {
+      document.getElementById("searchInput").value = name;
+      searchGuest();
+    }
+
+    // ==========================================
+    // 4. SVG 平移與縮放 (Zoom & Pan)
+    // ==========================================
+    let scale = 1;
+    let pointX = 0;
+    let pointY = 0;
+    let startX = 0;
+    let startY = 0;
+    let isDragging = false;
+    const mapGroup = document.getElementById("mapGroup");
+    const viewport = document.getElementById("mapViewport");
+
+    function updateTransform() {
+      mapGroup.setAttribute("transform", `translate(${pointX}, ${pointY}) scale(${scale})`);
+    }
+
+    function zoom(factor) {
+      scale *= factor;
+      scale = Math.min(Math.max(0.6, scale), 3);
+      updateTransform();
+    }
+
+    function resetZoom() {
+      scale = 1;
+      pointX = 0;
+      pointY = 0;
+      updateTransform();
+    }
+
+    function focusCoordinate(cx, cy) {
+      scale = 1.6;
+      // 將 SVG 坐標對齊至容器中心
+      pointX = 600 - cx * scale;
+      pointY = 450 - cy * scale;
+      updateTransform();
+    }
+
+    // 拖曳地圖效果
+    viewport.addEventListener("mousedown", (e) => {
+      isDragging = true;
+      startX = e.clientX - pointX;
+      startY = e.clientY - pointY;
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!isDragging) return;
+      pointX = e.clientX - startX;
+      pointY = e.clientY - startY;
+      updateTransform();
+    });
+
+    window.addEventListener("mouseup", () => { isDragging = false; });
+
+    // 初始化頁面
+    window.onload = () => {
+      initTablesDB();
+      renderSVGMap();
+    };
+  </script>
+</body>
+</html>
